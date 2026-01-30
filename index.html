@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pushup Counter | AI-Powered Rep Tracking</title>
+  <meta name="description" content="Track your pushups with AI-powered pose detection">
+  
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <!-- MediaPipe Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --background: #0a0f1a;
+      --card: #111827;
+      --card-alpha: rgba(17, 24, 39, 0.7);
+      --foreground: #f1f5f9;
+      --primary: #22c55e;
+      --secondary: #06b6d4;
+      --muted: #1e293b;
+      --muted-foreground: #64748b;
+      --destructive: #ef4444;
+      --border: #1e3a5f;
+      --gradient-primary: linear-gradient(135deg, #22c55e, #06b6d4);
+      --shadow-glow: 0 0 40px rgba(34, 197, 94, 0.3);
+      --font-display: 'Outfit', sans-serif;
+    }
+
+    body {
+      font-family: var(--font-display);
+      background: linear-gradient(180deg, #0a0f1a, #050810);
+      color: var(--foreground);
+      min-height: 100vh;
+      padding: 1rem;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      animation: fadeInDown 0.6s ease-out;
+    }
+
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: var(--muted-foreground);
+      font-size: 1.1rem;
+    }
+
+    /* Main Grid */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (min-width: 1024px) {
+      .main-grid {
+        grid-template-columns: 2fr 1fr;
+      }
+    }
+
+    /* Glass Card */
+    .glass {
+      background: var(--card-alpha);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(30, 58, 95, 0.5);
+      border-radius: 1rem;
+    }
+
+    /* Camera View */
+    .camera-container {
+      position: relative;
+      aspect-ratio: 16/9;
+      overflow: hidden;
+      animation: fadeIn 0.5s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .camera-container::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 1rem;
+      padding: 2px;
+      background: var(--gradient-primary);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #video, #canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    #canvas {
+      pointer-events: none;
+    }
+
+    /* Placeholder */
+    .placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--card);
+      z-index: 5;
+    }
+
+    .placeholder.hidden {
+      display: none;
+    }
+
+    .placeholder-icon {
+      width: 6rem;
+      height: 6rem;
+      border-radius: 50%;
+      background: rgba(34, 197, 94, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1rem;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(1.1); opacity: 1; }
+    }
+
+    .placeholder-icon svg {
+      width: 3rem;
+      height: 3rem;
+      color: var(--primary);
+    }
+
+    .placeholder p {
+      color: var(--muted-foreground);
+      font-size: 1.1rem;
+    }
+
+    .placeholder .hint {
+      color: rgba(100, 116, 139, 0.6);
+      font-size: 0.875rem;
+      margin-top: 0.5rem;
+    }
+
+    /* Overlays */
+    .overlay {
+      position: absolute;
+      z-index: 8;
+      padding: 0.75rem 1rem;
+    }
+
+    .overlay-tl { top: 1rem; left: 1rem; }
+    .overlay-tr { top: 1rem; right: 1rem; }
+    .overlay-bl { bottom: 1rem; left: 1rem; }
+    .overlay-br { bottom: 1rem; right: 1rem; }
+
+    .overlay-label {
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .overlay-value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .overlay-value.highlight {
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .state-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .state-dot {
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.2s;
+    }
+
+    .state-dot.active {
+      background: var(--primary);
+    }
+
+    .live-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 9999px;
+    }
+
+    .live-dot {
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 50%;
+      background: var(--destructive);
+      animation: blink 1.5s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 1.5rem;
+      animation: fadeInUp 0.5s ease-out 0.2s both;
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.875rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+
+    .btn svg {
+      width: 1.25rem;
+      height: 1.25rem;
+    }
+
+    .btn-primary {
+      background: var(--gradient-primary);
+      color: #0a0f1a;
+      box-shadow: var(--shadow-glow);
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-2px);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-danger {
+      background: var(--destructive);
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--foreground);
+      border: 2px solid var(--border);
+    }
+
+    .btn-outline:hover {
+      background: var(--muted);
+      border-color: rgba(34, 197, 94, 0.5);
+    }
+
+    /* Stats Sidebar */
+    .stats-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .stat-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      animation: slideInRight 0.5s ease-out both;
+    }
+
+    .stat-card:nth-child(1) { animation-delay: 0.1s; }
+    .stat-card:nth-child(2) { animation-delay: 0.2s; }
+    .stat-card:nth-child(3) { animation-delay: 0.3s; }
+    .stat-card:nth-child(4) { animation-delay: 0.4s; }
+
+    @keyframes slideInRight {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .stat-card.highlight {
+      box-shadow: var(--shadow-glow);
+    }
+
+    .stat-card.highlight::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 1rem;
+      padding: 2px;
+      background: var(--gradient-primary);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    .stat-icon {
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--muted);
+      color: var(--muted-foreground);
+    }
+
+    .stat-card.highlight .stat-icon {
+      background: rgba(34, 197, 94, 0.2);
+      color: var(--primary);
+    }
+
+    .stat-icon svg {
+      width: 1.5rem;
+      height: 1.5rem;
+    }
+
+    .stat-content {
+      flex: 1;
+    }
+
+    .stat-label {
+      font-size: 0.875rem;
+      color: var(--muted-foreground);
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .stat-card.highlight .stat-value {
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* History Panel */
+    .history-panel {
+      margin-top: 1rem;
+      animation: slideInRight 0.5s ease-out 0.5s both;
+    }
+
+    .history-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1rem;
+      border-bottom: 1px solid rgba(30, 58, 95, 0.5);
+    }
+
+    .history-header svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      color: var(--primary);
+    }
+
+    .history-header h3 {
+      font-weight: 600;
+    }
+
+    .history-list {
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      background: rgba(30, 41, 59, 0.5);
+      border-radius: 0.5rem;
+    }
+
+    .history-date {
+      color: var(--muted-foreground);
+      font-size: 0.875rem;
+    }
+
+    .history-count {
+      font-weight: 600;
+    }
+
+    .history-count span {
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+      font-weight: 400;
+    }
+
+    .empty-history {
+      text-align: center;
+      color: var(--muted-foreground);
+      padding: 2rem;
+      font-size: 0.875rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      h1 { font-size: 1.75rem; }
+      .subtitle { font-size: 0.9rem; }
+      .btn { padding: 0.75rem 1.5rem; font-size: 0.9rem; }
+      .overlay-value { font-size: 1.5rem; }
+    }
+
+    /* Count Animation */
+    @keyframes countPop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+
+    .count-pop {
+      animation: countPop 0.3s ease-out;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--muted);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <h1>Pushup Counter</h1>
+      <p class="subtitle">AI-powered rep tracking with pose detection</p>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+      <!-- Camera Section -->
+      <div>
+        <div class="camera-container glass">
+          <video id="video" playsinline></video>
+          <canvas id="canvas"></canvas>
+          
+          <!-- Placeholder -->
+          <div class="placeholder" id="placeholder">
+            <div class="placeholder-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <p>Click "Start Camera" to begin</p>
+            <p class="hint">Position yourself sideways for best detection</p>
+          </div>
+
+          <!-- Live Overlays -->
+          <div class="overlay overlay-tl glass" id="countOverlay" style="display: none;">
+            <div class="overlay-label">REPS</div>
+            <div class="overlay-value highlight" id="liveCount">0</div>
+          </div>
+
+          <div class="overlay overlay-tr glass" id="stateOverlay" style="display: none;">
+            <div class="state-indicator">
+              <div class="state-dot" id="stateDot"></div>
+              <span id="stateText">UP</span>
+            </div>
+          </div>
+
+          <div class="overlay overlay-bl glass" id="angleOverlay" style="display: none;">
+            <div class="overlay-label">ELBOW</div>
+            <div class="overlay-value" id="angleValue" style="color: var(--secondary);">--°</div>
+          </div>
+
+          <div class="overlay overlay-br glass live-indicator" id="liveOverlay" style="display: none;">
+            <div class="live-dot"></div>
+            <span>LIVE</span>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+          <button class="btn btn-primary" id="startBtn">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Start Camera
+          </button>
+          <button class="btn btn-danger" id="stopBtn" disabled>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+            </svg>
+            Stop Camera
+          </button>
+          <button class="btn btn-outline" id="resetBtn">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Reset Count
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats Sidebar -->
+      <div class="stats-grid">
+        <div class="stat-card glass highlight" style="position: relative;">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">Today's Pushups</div>
+            <div class="stat-value" id="todayCount">0</div>
+          </div>
+        </div>
+
+        <div class="stat-card glass">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">This Week</div>
+            <div class="stat-value" id="weeklyTotal">0</div>
+          </div>
+        </div>
+
+        <div class="stat-card glass">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+            </svg>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">Current Streak</div>
+            <div class="stat-value" id="streak">0 days</div>
+          </div>
+        </div>
+
+        <div class="stat-card glass">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">Elbow Angle</div>
+            <div class="stat-value" id="elbowAngle">--</div>
+          </div>
+        </div>
+
+        <!-- History Panel -->
+        <div class="history-panel glass">
+          <div class="history-header">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <h3>History</h3>
+          </div>
+          <div class="history-list" id="historyList">
+            <p class="empty-history">No history yet. Start your first workout!</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =============== CONSTANTS ===============
+    const UP_ANGLE_THRESHOLD = 160;
+    const DOWN_ANGLE_THRESHOLD = 70;
+    const REQUIRED_FRAMES = 3;
+    const STORAGE_KEY = 'pushup_history';
+
+    // =============== STATE ===============
+    let isDetecting = false;
+    let pose = null;
+    let camera = null;
+    let currentState = 'up';
+    let upCount = 0;
+    let downCount = 0;
+    let todayPushups = 0;
+    let history = {};
+
+    // =============== DOM ELEMENTS ===============
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const placeholder = document.getElementById('placeholder');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const countOverlay = document.getElementById('countOverlay');
+    const stateOverlay = document.getElementById('stateOverlay');
+    const angleOverlay = document.getElementById('angleOverlay');
+    const liveOverlay = document.getElementById('liveOverlay');
+    const liveCount = document.getElementById('liveCount');
+    const stateDot = document.getElementById('stateDot');
+    const stateText = document.getElementById('stateText');
+    const angleValue = document.getElementById('angleValue');
+    const todayCountEl = document.getElementById('todayCount');
+    const weeklyTotalEl = document.getElementById('weeklyTotal');
+    const streakEl = document.getElementById('streak');
+    const elbowAngleEl = document.getElementById('elbowAngle');
+    const historyList = document.getElementById('historyList');
+
+    // =============== UTILITIES ===============
+    function getTodayDate() {
+      return new Date().toISOString().split('T')[0];
+    }
+
+    function formatDate(dateStr) {
+      const date = new Date(dateStr);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      if (dateStr === today.toISOString().split('T')[0]) return 'Today';
+      if (dateStr === yesterday.toISOString().split('T')[0]) return 'Yesterday';
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function calculateAngle(a, b, c) {
+      const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+      let angle = Math.abs(radians * 180 / Math.PI);
+      if (angle > 180) angle = 360 - angle;
+      return angle;
+    }
+
+    // =============== HISTORY MANAGEMENT ===============
+    function loadHistory() {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        try {
+          history = JSON.parse(stored);
+        } catch (e) {
+          history = {};
+        }
+      }
+      todayPushups = history[getTodayDate()] || 0;
+      updateStats();
+      renderHistory();
+    }
+
+    function saveHistory() {
+      history[getTodayDate()] = todayPushups;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+      updateStats();
+      renderHistory();
+    }
+
+    function updateStats() {
+      todayCountEl.textContent = todayPushups;
+      liveCount.textContent = todayPushups;
+
+      // Weekly total
+      const today = new Date();
+      let weeklyTotal = 0;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        weeklyTotal += history[dateStr] || 0;
+      }
+      weeklyTotalEl.textContent = weeklyTotal;
+
+      // Streak
+      let streak = 0;
+      for (let i = 0; i < 365; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        if (history[dateStr] && history[dateStr] > 0) {
+          streak++;
+        } else {
+          break;
+        }
+      }
+      streakEl.textContent = `${streak} day${streak !== 1 ? 's' : ''}`;
+    }
+
+    function renderHistory() {
+      const dates = Object.keys(history).sort((a, b) => b.localeCompare(a)).slice(0, 7);
+      
+      if (dates.length === 0) {
+        historyList.innerHTML = '<p class="empty-history">No history yet. Start your first workout!</p>';
+        return;
+      }
+
+      historyList.innerHTML = dates.map(date => `
+        <div class="history-item">
+          <span class="history-date">${formatDate(date)}</span>
+          <span class="history-count">${history[date]} <span>reps</span></span>
+        </div>
+      `).join('');
+    }
+
+    function incrementCount() {
+      todayPushups++;
+      saveHistory();
+      
+      // Animate count
+      todayCountEl.classList.remove('count-pop');
+      void todayCountEl.offsetWidth; // Trigger reflow
+      todayCountEl.classList.add('count-pop');
+    }
+
+    function resetCount() {
+      todayPushups = 0;
+      currentState = 'up';
+      upCount = 0;
+      downCount = 0;
+      saveHistory();
+    }
+
+    // =============== POSE DETECTION ===============
+    function onResults(results) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (results.poseLandmarks) {
+        const landmarks = results.poseLandmarks;
+
+        // Draw connections
+        const connections = [
+          [11, 13], [13, 15], // Left arm
+          [12, 14], [14, 16], // Right arm
+          [11, 12], // Shoulders
+          [11, 23], [12, 24], // Torso
+          [23, 24], // Hips
+        ];
+
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 3;
+        connections.forEach(([start, end]) => {
+          const startPoint = landmarks[start];
+          const endPoint = landmarks[end];
+          if (startPoint && endPoint) {
+            ctx.beginPath();
+            ctx.moveTo(startPoint.x * canvas.width, startPoint.y * canvas.height);
+            ctx.lineTo(endPoint.x * canvas.width, endPoint.y * canvas.height);
+            ctx.stroke();
+          }
+        });
+
+        // Draw key landmarks
+        [11, 12, 13, 14, 15, 16].forEach(idx => {
+          const point = landmarks[idx];
+          if (point) {
+            ctx.beginPath();
+            ctx.arc(point.x * canvas.width, point.y * canvas.height, 6, 0, 2 * Math.PI);
+            ctx.fillStyle = '#22c55e';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+        });
+
+        // Get arm landmarks
+        const rightShoulder = landmarks[12];
+        const rightElbow = landmarks[14];
+        const rightWrist = landmarks[16];
+        const leftShoulder = landmarks[11];
+        const leftElbow = landmarks[13];
+        const leftWrist = landmarks[15];
+
+        let shoulder, elbow, wrist;
+        const rightVis = (rightShoulder?.visibility || 0) + (rightElbow?.visibility || 0) + (rightWrist?.visibility || 0);
+        const leftVis = (leftShoulder?.visibility || 0) + (leftElbow?.visibility || 0) + (leftWrist?.visibility || 0);
+
+        if (rightVis >= leftVis) {
+          shoulder = rightShoulder;
+          elbow = rightElbow;
+          wrist = rightWrist;
+        } else {
+          shoulder = leftShoulder;
+          elbow = leftElbow;
+          wrist = leftWrist;
+        }
+
+        if (shoulder && elbow && wrist) {
+          const angle = Math.round(calculateAngle(shoulder, elbow, wrist));
+          angleValue.textContent = `${angle}°`;
+          elbowAngleEl.textContent = `${angle}°`;
+
+          // Draw angle at elbow
+          ctx.font = 'bold 16px Outfit';
+          ctx.fillStyle = '#22c55e';
+          ctx.fillText(`${angle}°`, elbow.x * canvas.width + 15, elbow.y * canvas.height - 10);
+
+          // Pushup state machine
+          if (angle > UP_ANGLE_THRESHOLD) {
+            upCount++;
+            downCount = 0;
+          } else if (angle < DOWN_ANGLE_THRESHOLD) {
+            downCount++;
+            upCount = 0;
+          } else {
+            upCount = 0;
+            downCount = 0;
+          }
+
+          if (currentState === 'up' && downCount >= REQUIRED_FRAMES) {
+            currentState = 'down';
+            stateText.textContent = 'DOWN';
+            stateDot.classList.add('active');
+          } else if (currentState === 'down' && upCount >= REQUIRED_FRAMES) {
+            currentState = 'up';
+            stateText.textContent = 'UP';
+            stateDot.classList.remove('active');
+            incrementCount();
+
+            // Visual feedback
+            ctx.font = 'bold 32px Outfit';
+            ctx.fillStyle = '#22c55e';
+            ctx.textAlign = 'center';
+            ctx.fillText('REP COUNTED!', canvas.width / 2, 50);
+          }
+        }
+      }
+    }
+
+    async function startCamera() {
+      if (isDetecting) return;
+
+      try {
+        pose = new Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+        });
+
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.6,
+          minTrackingConfidence: 0.6,
+        });
+
+        pose.onResults(onResults);
+
+        camera = new Camera(video, {
+          onFrame: async () => {
+            if (pose) await pose.send({ image: video });
+          },
+          width: 640,
+          height: 480,
+        });
+
+        await camera.start();
+
+        isDetecting = true;
+        placeholder.classList.add('hidden');
+        countOverlay.style.display = 'block';
+        stateOverlay.style.display = 'block';
+        angleOverlay.style.display = 'block';
+        liveOverlay.style.display = 'flex';
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (error) {
+        console.error('Failed to start camera:', error);
+        alert('Failed to start camera. Please ensure camera permissions are granted.');
+      }
+    }
+
+    function stopCamera() {
+      if (!isDetecting) return;
+
+      if (camera) {
+        camera.stop();
+        camera = null;
+      }
+      if (pose) {
+        pose.close();
+        pose = null;
+      }
+
+      isDetecting = false;
+      placeholder.classList.remove('hidden');
+      countOverlay.style.display = 'none';
+      stateOverlay.style.display = 'none';
+      angleOverlay.style.display = 'none';
+      liveOverlay.style.display = 'none';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // =============== EVENT LISTENERS ===============
+    startBtn.addEventListener('click', startCamera);
+    stopBtn.addEventListener('click', stopCamera);
+    resetBtn.addEventListener('click', resetCount);
+
+    // =============== INIT ===============
+    loadHistory();
+  </script>
+</body>
+</html>
